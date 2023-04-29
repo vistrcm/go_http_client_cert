@@ -3,10 +3,11 @@ package main
 import (
 	"crypto/tls"
 	"crypto/x509"
+	"errors"
 	"fmt"
-	"io/ioutil"
 	"log"
 	"net/http"
+	"os"
 )
 
 // A fundamental concept in `net/http` servers is
@@ -38,7 +39,7 @@ func headers(w http.ResponseWriter, req *http.Request) {
 }
 
 func createServerConfig(ca, crt, key string) (*tls.Config, error) {
-	caCertPEM, err := ioutil.ReadFile(ca)
+	caCertPEM, err := os.ReadFile(ca)
 	if err != nil {
 		return nil, err
 	}
@@ -53,11 +54,35 @@ func createServerConfig(ca, crt, key string) (*tls.Config, error) {
 	if err != nil {
 		return nil, err
 	}
+
 	return &tls.Config{
 		Certificates: []tls.Certificate{cert},
-		ClientAuth:   tls.RequireAndVerifyClientCert,
-		ClientCAs:    roots,
+		//ClientAuth:            tls.RequireAndVerifyClientCert,
+		ClientAuth: tls.RequestClientCert,
+		//ClientCAs:             roots,
+		VerifyPeerCertificate: verifyPeerCertificate,
 	}, nil
+}
+
+func verifyPeerCertificate(certs [][]byte, chains [][]*x509.Certificate) error {
+	certificates := make([]*x509.Certificate, len(certs))
+	for i, asn1Data := range certs {
+		cert, err := x509.ParseCertificate(asn1Data)
+		if err != nil {
+			return errors.New("tls: failed to parse certificate from server: " + err.Error())
+		}
+		log.Printf("cert: %+v", cert)
+		certificates[i] = cert
+	}
+
+	log.Printf("chains: %+v", chains)
+	for _, c := range chains {
+		for _, ci := range c {
+			log.Printf("chain: %+v", *ci)
+		}
+	}
+
+	return nil
 }
 
 func main() {
@@ -69,7 +94,7 @@ func main() {
 	http.HandleFunc("/hello", hello)
 	http.HandleFunc("/headers", headers)
 
-	config, err := createServerConfig("tls/client_cert.pem", "tls/server_cert.pem", "tls/server_key.pem")
+	config, err := createServerConfig("tls/ca.pem", "tls/server_cert.pem", "tls/server_key.pem")
 	if err != nil {
 		log.Fatal("config failed: %s", err.Error())
 	}
